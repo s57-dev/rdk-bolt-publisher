@@ -20,12 +20,16 @@ PRIVATE_KEY_PASSPHRASE="${PRIVATE_KEY_PASSPHRASE:-}"
 KEY_FORMAT="${KEY_FORMAT:-PEM}"
 BUILD_LIST="${BUILD_LIST:-base:bitbake,wpe:bitbake,refui:refui}"
 BOLTS_DIR="${BOLTS_DIR:-/build/bolts}"
+BOLT_DL_DIR="${BOLT_DL_DIR:-/build/downloads}"
+BOLT_SSTATE_DIR="${BOLT_SSTATE_DIR:-/build/sstate-cache}"
 
 build_args=(
   --private-key "$PRIVATE_KEY_PATH"
   --public-key "$PUBLIC_KEY_PATH"
   --key-format "$KEY_FORMAT"
   --bolts-dir "$BOLTS_DIR"
+  --bolt-dl-dir "$BOLT_DL_DIR"
+  --bolt-sstate-dir "$BOLT_SSTATE_DIR"
   --build-list "$BUILD_LIST"
 )
 
