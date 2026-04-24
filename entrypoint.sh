@@ -10,7 +10,7 @@ cd /build
 git clone https://github.com/rdkcentral/bolt-pkg-build-scripts work | true
 cd /build/work
 
-if [[ -n "${OPEN_SHELL}" ]]; then
+if [[ -n "${OPEN_SHELL:-}" ]]; then
   exec /bin/bash
 fi
 
