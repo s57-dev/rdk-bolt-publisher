@@ -130,12 +130,24 @@ jobs:
             -v "$RUNNER_TEMP/rdk-keys:/secrets:ro" \
             bolt-builder
 
+      - name: Install AWS CLI (if missing)
+        run: |
+          set -euo pipefail
+          if command -v aws >/dev/null 2>&1; then
+            aws --version
+            exit 0
+          fi
+          python3 -m venv "$RUNNER_TEMP/awscli-venv"
+          "$RUNNER_TEMP/awscli-venv/bin/pip" install --upgrade pip awscli
+          echo "$RUNNER_TEMP/awscli-venv/bin" >> "$GITHUB_PATH"
+
       - name: Upload artifacts to Cloudflare R2
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.CLOUDFLARE_R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.CLOUDFLARE_R2_SECRET_ACCESS_KEY }}
         run: |
           set -euo pipefail
+          aws --version
           if ! compgen -G "$GITHUB_WORKSPACE/bolts/*.bolt" > /dev/null; then
             echo "No .bolt files found in bolts/"
             exit 1
