@@ -58,9 +58,27 @@ jobs:
             printf '%s' "$RDK_SIGNING_P12_BASE64" | base64 -d > "$RUNNER_TEMP/rdk-keys/signing.p12"
             cp "$RUNNER_TEMP/rdk-keys/signing.p12" "$RUNNER_TEMP/rdk-keys/public_key.p12"
             chmod 600 "$RUNNER_TEMP/rdk-keys/signing.p12" "$RUNNER_TEMP/rdk-keys/public_key.p12"
+            if [[ -n "${RDK_PUBLIC_KEY_PEM:-}" ]]; then
+              printf '%s' "$RDK_PUBLIC_KEY_PEM" > "$RUNNER_TEMP/rdk-keys/public.pem"
+              chmod 600 "$RUNNER_TEMP/rdk-keys/public.pem"
+              publish_key_file="$RUNNER_TEMP/rdk-keys/public.pem"
+              publish_key_name="public.pem"
+            else
+              openssl pkcs12 \
+                -in "$RUNNER_TEMP/rdk-keys/signing.p12" \
+                -nokeys \
+                -clcerts \
+                -passin "pass:${RDK_PRIVATE_KEY_PASSPHRASE:-}" \
+                -out "$RUNNER_TEMP/rdk-keys/public-cert.pem"
+              chmod 600 "$RUNNER_TEMP/rdk-keys/public-cert.pem"
+              publish_key_file="$RUNNER_TEMP/rdk-keys/public-cert.pem"
+              publish_key_name="public-cert.pem"
+            fi
             echo "private_key_path=/secrets/signing.p12" >> "$GITHUB_OUTPUT"
             echo "public_key_path=/secrets/public_key.p12" >> "$GITHUB_OUTPUT"
             echo "key_format=PKCS12" >> "$GITHUB_OUTPUT"
+            echo "publish_key_file=$publish_key_file" >> "$GITHUB_OUTPUT"
+            echo "publish_key_name=$publish_key_name" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -92,6 +110,8 @@ jobs:
           echo "private_key_path=/secrets/private_key.pem" >> "$GITHUB_OUTPUT"
           echo "public_key_path=/secrets/public.pem" >> "$GITHUB_OUTPUT"
           echo "key_format=PEM" >> "$GITHUB_OUTPUT"
+          echo "publish_key_file=$RUNNER_TEMP/rdk-keys/public.pem" >> "$GITHUB_OUTPUT"
+          echo "publish_key_name=public.pem" >> "$GITHUB_OUTPUT"
 
       - name: Build and sign packages in Docker
         env:
@@ -125,6 +145,10 @@ jobs:
             --recursive \
             --endpoint-url "$R2_ENDPOINT"
 
+          aws s3 cp "${{ steps.prepare_keys.outputs.publish_key_file }}" \
+            "s3://$R2_BUCKET/$R2_PREFIX/keys/${{ steps.prepare_keys.outputs.publish_key_name }}" \
+            --endpoint-url "$R2_ENDPOINT"
+
       - name: Cleanup key material
         if: always()
         run: |
@@ -132,5 +156,6 @@ jobs:
           rm -f \
             "$RUNNER_TEMP/rdk-keys/private_key.pem" \
             "$RUNNER_TEMP/rdk-keys/public.pem" \
+            "$RUNNER_TEMP/rdk-keys/public-cert.pem" \
             "$RUNNER_TEMP/rdk-keys/signing.p12" \
             "$RUNNER_TEMP/rdk-keys/public_key.p12"
