@@ -82,22 +82,9 @@ jobs:
           printf '%s' "$RDK_PRIVATE_KEY_PEM" > "$RUNNER_TEMP/rdk-keys/private_key.pem"
           chmod 600 "$RUNNER_TEMP/rdk-keys/private_key.pem"
 
-          if [[ -n "${RDK_PUBLIC_KEY_PEM:-}" ]]; then
-            printf '%s' "$RDK_PUBLIC_KEY_PEM" > "$RUNNER_TEMP/rdk-keys/public.pem"
-          else
-            if [[ -n "${RDK_PRIVATE_KEY_PASSPHRASE:-}" ]]; then
-              openssl pkey \
-                -in "$RUNNER_TEMP/rdk-keys/private_key.pem" \
-                -passin "pass:${RDK_PRIVATE_KEY_PASSPHRASE}" \
-                -pubout \
-                -out "$RUNNER_TEMP/rdk-keys/public.pem"
-            else
-              openssl pkey \
-                -in "$RUNNER_TEMP/rdk-keys/private_key.pem" \
-                -pubout \
-                -out "$RUNNER_TEMP/rdk-keys/public.pem"
-            fi
-          fi
+          # For PEM signing mode, pass certificate PEM to the build scripts so the
+          # produced bolt carries signing certificate metadata expected by libPackage.
+          printf '%s' "$RDK_PUBLIC_CERT_PEM" > "$RUNNER_TEMP/rdk-keys/public.pem"
           chmod 600 "$RUNNER_TEMP/rdk-keys/public.pem"
           echo "private_key_path=/secrets/private_key.pem" >> "$GITHUB_OUTPUT"
           echo "public_key_path=/secrets/public.pem" >> "$GITHUB_OUTPUT"
