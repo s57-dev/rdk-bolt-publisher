@@ -80,6 +80,7 @@ jobs:
 
           echo "key_format=PEM" >> "$GITHUB_OUTPUT"
           echo "publish_key_name=public-cert.pem" >> "$GITHUB_OUTPUT"
+          echo "publish_key_file=$RUNNER_TEMP/keys/public-cert.pem" >> "$GITHUB_OUTPUT"
 
 
       - name: Build and sign packages in Docker
