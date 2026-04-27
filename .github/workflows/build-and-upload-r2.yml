@@ -14,7 +14,6 @@ on:
         type: choice
         options:
           - PEM
-          - PKCS12
       r2_prefix:
         description: 'R2 key prefix for uploaded artifacts'
         required: false
