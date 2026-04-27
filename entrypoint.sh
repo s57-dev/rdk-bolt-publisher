@@ -22,6 +22,7 @@ BUILD_LIST="${BUILD_LIST:-base:bitbake,wpe:bitbake,refui:refui}"
 BOLTS_DIR="${BOLTS_DIR:-/build/bolts}"
 BOLT_DL_DIR="${BOLT_DL_DIR:-/build/downloads}"
 BOLT_SSTATE_DIR="${BOLT_SSTATE_DIR:-/build/sstate-cache}"
+MANIFEST_FILE="${MANIFEST_FILE:-${BOLTS_DIR}/factory-app-version.json}"
 
 build_args=(
   --private-key "$PRIVATE_KEY_PATH"
@@ -30,6 +31,7 @@ build_args=(
   --bolts-dir "$BOLTS_DIR"
   --bolt-dl-dir "$BOLT_DL_DIR"
   --bolt-sstate-dir "$BOLT_SSTATE_DIR"
+  --manifest-file "$MANIFEST_FILE"
   --build-list "$BUILD_LIST"
 )
 

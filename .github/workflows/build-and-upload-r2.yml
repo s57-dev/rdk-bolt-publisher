@@ -45,33 +45,20 @@ jobs:
           RDK_PUBLIC_KEY_PEM: ${{ secrets.RDK_PUBLIC_KEY_PEM }}
           RDK_PUBLIC_CERT_PEM: ${{ secrets.RDK_PUBLIC_CERT_PEM }}
           RDK_PRIVATE_KEY_PASSPHRASE: ${{ secrets.RDK_PRIVATE_KEY_PASSPHRASE }}
-          RDK_SIGNING_P12_BASE64: ${{ secrets.RDK_SIGNING_P12_BASE64 }}
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/rdk-keys"
-          chmod 700 "$RUNNER_TEMP/rdk-keys"
+
+          mkdir -p "$RUNNER_TEMP/keys"
+          chmod 700 "$RUNNER_TEMP/keys"
+
+          if [[ "$KEY_FORMAT" == "PKCS12" ]]; then
+            echo "PKCS12 is not used in this workflow; use PEM key_format"
+            exit 1
+          fi
 
           if [[ -z "${RDK_PUBLIC_CERT_PEM:-}" ]]; then
             echo "Missing required secret: RDK_PUBLIC_CERT_PEM"
             exit 1
-          fi
-          printf '%s' "$RDK_PUBLIC_CERT_PEM" > "$RUNNER_TEMP/rdk-keys/publish-cert.pem"
-          chmod 600 "$RUNNER_TEMP/rdk-keys/publish-cert.pem"
-
-          if [[ "$KEY_FORMAT" == "PKCS12" ]]; then
-            if [[ -z "${RDK_SIGNING_P12_BASE64:-}" ]]; then
-              echo "Missing required secret for PKCS12: RDK_SIGNING_P12_BASE64"
-              exit 1
-            fi
-            printf '%s' "$RDK_SIGNING_P12_BASE64" | base64 -d > "$RUNNER_TEMP/rdk-keys/signing.p12"
-            cp "$RUNNER_TEMP/rdk-keys/signing.p12" "$RUNNER_TEMP/rdk-keys/public_key.p12"
-            chmod 600 "$RUNNER_TEMP/rdk-keys/signing.p12" "$RUNNER_TEMP/rdk-keys/public_key.p12"
-            echo "private_key_path=/secrets/signing.p12" >> "$GITHUB_OUTPUT"
-            echo "public_key_path=/secrets/public_key.p12" >> "$GITHUB_OUTPUT"
-            echo "key_format=PKCS12" >> "$GITHUB_OUTPUT"
-            echo "publish_key_file=$RUNNER_TEMP/rdk-keys/publish-cert.pem" >> "$GITHUB_OUTPUT"
-            echo "publish_key_name=public.pem" >> "$GITHUB_OUTPUT"
-            exit 0
           fi
 
           if [[ -z "${RDK_PRIVATE_KEY_PEM:-}" ]]; then
@@ -79,18 +66,22 @@ jobs:
             exit 1
           fi
 
-          printf '%s' "$RDK_PRIVATE_KEY_PEM" > "$RUNNER_TEMP/rdk-keys/private_key.pem"
-          chmod 600 "$RUNNER_TEMP/rdk-keys/private_key.pem"
+          if [[ -z "${RDK_PUBLIC_KEY_PEM:-}" ]]; then
+            echo "Missing required secret for PEM: RDK_PUBLIC_KEY_PEM"
+            exit 1
+          fi
 
-          # For PEM signing mode, pass certificate PEM to the build scripts so the
-          # produced bolt carries signing certificate metadata expected by libPackage.
-          printf '%s' "$RDK_PUBLIC_CERT_PEM" > "$RUNNER_TEMP/rdk-keys/public.pem"
-          chmod 600 "$RUNNER_TEMP/rdk-keys/public.pem"
-          echo "private_key_path=/secrets/private_key.pem" >> "$GITHUB_OUTPUT"
-          echo "public_key_path=/secrets/public.pem" >> "$GITHUB_OUTPUT"
+          printf '%s' "$RDK_PRIVATE_KEY_PEM" > "$RUNNER_TEMP/keys/private_key.pem"
+          printf '%s' "$RDK_PUBLIC_KEY_PEM" > "$RUNNER_TEMP/keys/public.pem"
+          printf '%s' "$RDK_PUBLIC_CERT_PEM" > "$RUNNER_TEMP/keys/public-cert.pem"
+
+          chmod 600 "$RUNNER_TEMP/keys/private_key.pem"
+          chmod 600 "$RUNNER_TEMP/keys/public.pem"
+          chmod 600 "$RUNNER_TEMP/keys/public-cert.pem"
+
           echo "key_format=PEM" >> "$GITHUB_OUTPUT"
-          echo "publish_key_file=$RUNNER_TEMP/rdk-keys/publish-cert.pem" >> "$GITHUB_OUTPUT"
-          echo "publish_key_name=public.pem" >> "$GITHUB_OUTPUT"
+          echo "publish_key_name=public-cert.pem" >> "$GITHUB_OUTPUT"
+
 
       - name: Build and sign packages in Docker
         env:
@@ -99,15 +90,21 @@ jobs:
           set -euo pipefail
           mkdir -p "$GITHUB_WORKSPACE/bolts"
           docker run --rm \
-            -e PRIVATE_KEY_PATH="${{ steps.prepare_keys.outputs.private_key_path }}" \
-            -e PUBLIC_KEY_PATH="${{ steps.prepare_keys.outputs.public_key_path }}" \
-            -e PRIVATE_KEY_PASSPHRASE="${PRIVATE_KEY_PASSPHRASE:-}" \
-            -e KEY_FORMAT="${{ steps.prepare_keys.outputs.key_format }}" \
             -e BUILD_LIST="$BUILD_LIST" \
             -e BOLTS_DIR=/build/bolts \
+            -e MANIFEST_FILE=/build/bolts/factory-app-version.json \
             -v "$GITHUB_WORKSPACE:/build" \
-            -v "$RUNNER_TEMP/rdk-keys:/secrets:ro" \
+            -v "$RUNNER_TEMP/keys:/build/keys:ro" \
             bolt-builder
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: rdk-bolt-packages
+          if-no-files-found: error
+          path: |
+            bolts/*.bolt
+            bolts/factory-app-version.json
 
       - name: Install AWS CLI (if missing)
         run: |
@@ -141,7 +138,7 @@ jobs:
               aws s3 cp "$bolt_path" "$bolt_key" --endpoint-url "$R2_ENDPOINT"
             fi
           done
-
+          
           publish_key_target="s3://$R2_BUCKET/$R2_PREFIX/keys/${{ steps.prepare_keys.outputs.publish_key_name }}"
           if aws s3 ls "$publish_key_target" --endpoint-url "$R2_ENDPOINT" >/dev/null 2>&1; then
             echo "Already exists, skipping: ${{ steps.prepare_keys.outputs.publish_key_name }}"
@@ -156,9 +153,6 @@ jobs:
         run: |
           set -euo pipefail
           rm -f \
-            "$RUNNER_TEMP/rdk-keys/private_key.pem" \
-            "$RUNNER_TEMP/rdk-keys/public.pem" \
-            "$RUNNER_TEMP/rdk-keys/public-cert.pem" \
-            "$RUNNER_TEMP/rdk-keys/publish-cert.pem" \
-            "$RUNNER_TEMP/rdk-keys/signing.p12" \
-            "$RUNNER_TEMP/rdk-keys/public_key.p12"
+            "$RUNNER_TEMP/keys/private_key.pem" \
+            "$RUNNER_TEMP/keys/public-cert.pem" \
+            "$RUNNER_TEMP/keys/public_key.p12"
