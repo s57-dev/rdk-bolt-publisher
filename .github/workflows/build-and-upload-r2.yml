@@ -131,25 +131,16 @@ jobs:
             echo "No .bolt files found in bolts/"
             exit 1
           fi
-
           for bolt_path in "$GITHUB_WORKSPACE"/bolts/*.bolt; do
             bolt_name="$(basename "$bolt_path")"
             bolt_key="s3://$R2_BUCKET/$R2_PREFIX/$bolt_name"
-            if aws s3 ls "$bolt_key" --endpoint-url "$R2_ENDPOINT" >/dev/null 2>&1; then
-              echo "Already exists, skipping: $bolt_name"
-            else
-              aws s3 cp "$bolt_path" "$bolt_key" --endpoint-url "$R2_ENDPOINT"
-            fi
+            aws s3 cp "$bolt_path" "$bolt_key" --endpoint-url "$R2_ENDPOINT"
           done
-          
+
           publish_key_target="s3://$R2_BUCKET/$R2_PREFIX/keys/${{ steps.prepare_keys.outputs.publish_key_name }}"
-          if aws s3 ls "$publish_key_target" --endpoint-url "$R2_ENDPOINT" >/dev/null 2>&1; then
-            echo "Already exists, skipping: ${{ steps.prepare_keys.outputs.publish_key_name }}"
-          else
-            aws s3 cp "${{ steps.prepare_keys.outputs.publish_key_file }}" \
-              "$publish_key_target" \
-              --endpoint-url "$R2_ENDPOINT"
-          fi
+          aws s3 cp "${{ steps.prepare_keys.outputs.publish_key_file }}" \
+            "$publish_key_target" \
+            --endpoint-url "$R2_ENDPOINT"
 
       - name: Cleanup key material
         if: always()
