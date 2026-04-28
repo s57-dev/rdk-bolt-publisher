@@ -93,6 +93,9 @@ jobs:
             -e BUILD_LIST="$BUILD_LIST" \
             -e BOLTS_DIR=/build/bolts \
             -e MANIFEST_FILE=/build/bolts/factory-app-version.json \
+            -e KEY_FORMAT="${{ steps.prepare_keys.outputs.key_format }}" \
+            -e PRIVATE_KEY_PASSPHRASE="${PRIVATE_KEY_PASSPHRASE:-}" \
+            -e SIGNING_CERT_PATH=/build/keys/public-cert.pem \
             -v "$GITHUB_WORKSPACE:/build" \
             -v "$RUNNER_TEMP/keys:/build/keys:ro" \
             bolt-builder
