@@ -15,7 +15,6 @@ if [[ -n "${OPEN_SHELL:-}" ]]; then
 fi
 
 PRIVATE_KEY_PATH="${PRIVATE_KEY_PATH:-/build/keys/private_key.pem}"
-PUBLIC_KEY_PATH="${PUBLIC_KEY_PATH:-/build/keys/public.pem}"
 PRIVATE_KEY_PASSPHRASE="${PRIVATE_KEY_PASSPHRASE:-}"
 KEY_FORMAT="${KEY_FORMAT:-PEM}"
 BUILD_LIST="${BUILD_LIST:-base:bitbake,wpe:bitbake,refui:refui}"
@@ -24,9 +23,17 @@ BOLT_DL_DIR="${BOLT_DL_DIR:-/build/downloads}"
 BOLT_SSTATE_DIR="${BOLT_SSTATE_DIR:-/build/sstate-cache}"
 MANIFEST_FILE="${MANIFEST_FILE:-${BOLTS_DIR}/factory-app-version.json}"
 
+if [[ -z "${SIGNING_CERT_PATH:-}" ]]; then
+  if [[ -f /build/keys/signing-cert.pem ]]; then
+    SIGNING_CERT_PATH=/build/keys/signing-cert.pem
+  else
+    SIGNING_CERT_PATH=/build/keys/certificate.pem
+  fi
+fi
+
 build_args=(
   --private-key "$PRIVATE_KEY_PATH"
-  --public-key "$PUBLIC_KEY_PATH"
+  --signing-certificate "$SIGNING_CERT_PATH"
   --key-format "$KEY_FORMAT"
   --bolts-dir "$BOLTS_DIR"
   --bolt-dl-dir "$BOLT_DL_DIR"
@@ -40,30 +47,3 @@ if [[ -n "$PRIVATE_KEY_PASSPHRASE" ]]; then
 fi
 
 bash gen-bolt-pkgs.sh "${build_args[@]}"
-
-if [[ "$KEY_FORMAT" == "PEM" ]]; then
-  SIGNING_CERT_PATH="${SIGNING_CERT_PATH:-/build/keys/public-cert.pem}"
-
-  if [[ ! -f "$SIGNING_CERT_PATH" ]]; then
-    echo "Error: PEM signing requires certificate file: $SIGNING_CERT_PATH"
-    exit 1
-  fi
-
-  shopt -s nullglob
-  bolts=("$BOLTS_DIR"/*.bolt)
-  if [[ ${#bolts[@]} -eq 0 ]]; then
-    echo "Error: no .bolt packages found in $BOLTS_DIR"
-    exit 1
-  fi
-
-  for bolt in "${bolts[@]}"; do
-    sign_cmd=(/usr/bin/ralfpack sign --key "$PRIVATE_KEY_PATH" --certificate "$SIGNING_CERT_PATH")
-    if [[ -n "$PRIVATE_KEY_PASSPHRASE" ]]; then
-      sign_cmd+=(--passphrase "$PRIVATE_KEY_PASSPHRASE")
-    fi
-    sign_cmd+=("$bolt")
-
-    "${sign_cmd[@]}"
-    /usr/bin/ralfpack verify --ca-roots "$SIGNING_CERT_PATH" "$bolt"
-  done
-fi
