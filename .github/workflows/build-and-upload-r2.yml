@@ -30,6 +30,7 @@ jobs:
       BUILD_LIST: ${{ inputs.build_list }}
       KEY_FORMAT: ${{ inputs.key_format }}
       R2_PREFIX: ${{ inputs.r2_prefix }}
+      PUBLISH_BASE_URL: https://repo.solution57.com
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -100,6 +101,56 @@ jobs:
             -v "$RUNNER_TEMP/keys:/build/keys:ro" \
             bolt-builder
 
+      - name: Rewrite manifest for platform
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          from urllib.parse import quote
+
+          workspace = Path(os.environ["GITHUB_WORKSPACE"])
+          bolts_dir = workspace / "bolts"
+          base_url = os.environ["PUBLISH_BASE_URL"].rstrip("/")
+          prefix = os.environ["R2_PREFIX"].strip("/")
+          publish_key_name = os.environ["PUBLISH_KEY_NAME"]
+          publish_key_file = Path(os.environ["PUBLISH_KEY_FILE"])
+
+          bolt_files = sorted(bolts_dir.glob("*.bolt"))
+          if not bolt_files:
+              raise SystemExit("No .bolt files found in bolts/")
+          if not publish_key_file.is_file():
+              raise SystemExit(f"Publish key file not found: {publish_key_file}")
+
+          manifest = []
+          for bolt_file in bolt_files:
+              name = bolt_file.name
+              sha = hashlib.sha256(bolt_file.read_bytes()).hexdigest()
+              manifest.append({
+                  "packagename": name,
+                  "srcuri": f"{base_url}/{prefix}/{quote(name, safe='')}",
+                  "sha256sum": sha,
+                  "installpath": "/etc/rdk/factoryapps",
+              })
+
+          cert_sha = hashlib.sha256(publish_key_file.read_bytes()).hexdigest()
+          manifest.append({
+              "packagename": publish_key_name,
+              "srcuri": f"{base_url}/{prefix}/keys/{quote(publish_key_name, safe='')}",
+              "sha256sum": cert_sha,
+              "installpath": "/etc/rdk/certs",
+          })
+
+          output = bolts_dir / "factory-app-version.json"
+          output.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+          print(f"Wrote manifest: {output}")
+          PY
+        env:
+          PUBLISH_KEY_NAME: ${{ steps.prepare_keys.outputs.publish_key_name }}
+          PUBLISH_KEY_FILE: ${{ steps.prepare_keys.outputs.publish_key_file }}
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -140,6 +191,10 @@ jobs:
           publish_key_target="s3://$R2_BUCKET/$R2_PREFIX/keys/${{ steps.prepare_keys.outputs.publish_key_name }}"
           aws s3 cp "${{ steps.prepare_keys.outputs.publish_key_file }}" \
             "$publish_key_target" \
+            --endpoint-url "$R2_ENDPOINT"
+
+          aws s3 cp "$GITHUB_WORKSPACE/bolts/factory-app-version.json" \
+            "s3://$R2_BUCKET/$R2_PREFIX/factory-app-version.json" \
             --endpoint-url "$R2_ENDPOINT"
 
       - name: Cleanup key material
