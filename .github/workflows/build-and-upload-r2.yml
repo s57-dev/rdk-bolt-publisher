@@ -35,6 +35,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Set short commit SHA
+        run: echo "SHORT_SHA=${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
       - name: Build builder image
         run: docker build --tag bolt-builder .
 
@@ -182,20 +185,38 @@ jobs:
             echo "No .bolt files found in bolts/"
             exit 1
           fi
+
           for bolt_path in "$GITHUB_WORKSPACE"/bolts/*.bolt; do
             bolt_name="$(basename "$bolt_path")"
-            bolt_key="s3://$R2_BUCKET/$R2_PREFIX/$bolt_name"
-            aws s3 cp "$bolt_path" "$bolt_key" --endpoint-url "$R2_ENDPOINT"
+            bolt_key="$R2_PREFIX/$bolt_name"
+            if aws s3api head-object --bucket "$R2_BUCKET" --key "$bolt_key" --endpoint-url "$R2_ENDPOINT" 2>/dev/null; then
+              echo "Skipping $bolt_name (already exists in R2)"
+            else
+              aws s3 cp "$bolt_path" "s3://$R2_BUCKET/$bolt_key" --endpoint-url "$R2_ENDPOINT"
+            fi
           done
 
-          publish_key_target="s3://$R2_BUCKET/$R2_PREFIX/keys/${{ steps.prepare_keys.outputs.publish_key_name }}"
-          aws s3 cp "${{ steps.prepare_keys.outputs.publish_key_file }}" \
-            "$publish_key_target" \
-            --endpoint-url "$R2_ENDPOINT"
+          cert_key="$R2_PREFIX/keys/${{ steps.prepare_keys.outputs.publish_key_name }}"
+          if aws s3api head-object --bucket "$R2_BUCKET" --key "$cert_key" --endpoint-url "$R2_ENDPOINT" 2>/dev/null; then
+            echo "Skipping cert (already exists in R2)"
+          else
+            aws s3 cp "${{ steps.prepare_keys.outputs.publish_key_file }}" \
+              "s3://$R2_BUCKET/$cert_key" \
+              --endpoint-url "$R2_ENDPOINT"
+          fi
 
           aws s3 cp "$GITHUB_WORKSPACE/bolts/factory-app-version.json" \
             "s3://$R2_BUCKET/$R2_PREFIX/factory-app-version.json" \
             --endpoint-url "$R2_ENDPOINT"
+
+          versioned_manifest_key="$R2_PREFIX/factory-app-version-${SHORT_SHA}.json"
+          if aws s3api head-object --bucket "$R2_BUCKET" --key "$versioned_manifest_key" --endpoint-url "$R2_ENDPOINT" 2>/dev/null; then
+            echo "Skipping versioned manifest (already exists in R2)"
+          else
+            aws s3 cp "$GITHUB_WORKSPACE/bolts/factory-app-version.json" \
+              "s3://$R2_BUCKET/$versioned_manifest_key" \
+              --endpoint-url "$R2_ENDPOINT"
+          fi
 
       - name: Cleanup key material
         if: always()
