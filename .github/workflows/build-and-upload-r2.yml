@@ -182,10 +182,17 @@ jobs:
             echo "No .bolt files found in bolts/"
             exit 1
           fi
+
+          uploaded_bolt_count=0
           for bolt_path in "$GITHUB_WORKSPACE"/bolts/*.bolt; do
             bolt_name="$(basename "$bolt_path")"
             bolt_key="s3://$R2_BUCKET/$R2_PREFIX/$bolt_name"
-            aws s3 cp "$bolt_path" "$bolt_key" --endpoint-url "$R2_ENDPOINT"
+            if aws s3 ls "$bolt_key" --endpoint-url "$R2_ENDPOINT" >/dev/null 2>&1; then
+              echo "Already exists, skipping: $bolt_name"
+            else
+              aws s3 cp "$bolt_path" "$bolt_key" --endpoint-url "$R2_ENDPOINT"
+              uploaded_bolt_count=$((uploaded_bolt_count + 1))
+            fi
           done
 
           publish_key_target="s3://$R2_BUCKET/$R2_PREFIX/keys/${{ steps.prepare_keys.outputs.publish_key_name }}"
@@ -193,9 +200,16 @@ jobs:
             "$publish_key_target" \
             --endpoint-url "$R2_ENDPOINT"
 
-          aws s3 cp "$GITHUB_WORKSPACE/bolts/factory-app-version.json" \
-            "s3://$R2_BUCKET/$R2_PREFIX/factory-app-version.json" \
-            --endpoint-url "$R2_ENDPOINT"
+          if [[ "$uploaded_bolt_count" -gt 0 ]]; then
+            ts="$(date -u +%Y%m%dT%H%M%SZ)"
+            manifest_name="factory-app-version-${ts}.json"
+            aws s3 cp "$GITHUB_WORKSPACE/bolts/factory-app-version.json" \
+              "s3://$R2_BUCKET/$R2_PREFIX/${manifest_name}" \
+              --endpoint-url "$R2_ENDPOINT"
+            echo "Uploaded manifest: ${manifest_name}"
+          else
+            echo "No new bolt uploads, skipping manifest upload."
+          fi
 
       - name: Cleanup key material
         if: always()
