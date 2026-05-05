@@ -101,6 +101,14 @@ jobs:
             -v "$RUNNER_TEMP/keys:/build/keys:ro" \
             bolt-builder
 
+      - name: Set release timestamp
+        id: release_meta
+        run: |
+          set -euo pipefail
+          ts="$(date -u +%Y%m%dT%H%M%SZ)"
+          echo "ts=$ts" >> "$GITHUB_OUTPUT"
+          echo "release_dir=${R2_PREFIX}/${ts}" >> "$GITHUB_OUTPUT"
+
       - name: Rewrite manifest for platform
         run: |
           set -euo pipefail
@@ -114,7 +122,7 @@ jobs:
           workspace = Path(os.environ["GITHUB_WORKSPACE"])
           bolts_dir = workspace / "bolts"
           base_url = os.environ["PUBLISH_BASE_URL"].rstrip("/")
-          prefix = os.environ["R2_PREFIX"].strip("/")
+          release_dir = os.environ["RELEASE_DIR"].strip("/")
           publish_key_name = os.environ["PUBLISH_KEY_NAME"]
           publish_key_file = Path(os.environ["PUBLISH_KEY_FILE"])
 
@@ -130,7 +138,7 @@ jobs:
               sha = hashlib.sha256(bolt_file.read_bytes()).hexdigest()
               manifest.append({
                   "packagename": name,
-                  "srcuri": f"{base_url}/{prefix}/{quote(name, safe='')}",
+                  "srcuri": f"{base_url}/{release_dir}/{quote(name, safe='')}",
                   "sha256sum": sha,
                   "installpath": "/etc/rdk/factoryapps",
               })
@@ -138,7 +146,7 @@ jobs:
           cert_sha = hashlib.sha256(publish_key_file.read_bytes()).hexdigest()
           manifest.append({
               "packagename": publish_key_name,
-              "srcuri": f"{base_url}/{prefix}/keys/{quote(publish_key_name, safe='')}",
+              "srcuri": f"{base_url}/{release_dir}/keys/{quote(publish_key_name, safe='')}",
               "sha256sum": cert_sha,
               "installpath": "/etc/rdk/certs",
           })
@@ -150,6 +158,7 @@ jobs:
         env:
           PUBLISH_KEY_NAME: ${{ steps.prepare_keys.outputs.publish_key_name }}
           PUBLISH_KEY_FILE: ${{ steps.prepare_keys.outputs.publish_key_file }}
+          RELEASE_DIR: ${{ steps.release_meta.outputs.release_dir }}
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -183,37 +192,24 @@ jobs:
             exit 1
           fi
 
-          uploaded_bolt_count=0
+          release_dir="${{ steps.release_meta.outputs.release_dir }}"
+
           for bolt_path in "$GITHUB_WORKSPACE"/bolts/*.bolt; do
             bolt_name="$(basename "$bolt_path")"
-            bolt_key="$R2_PREFIX/$bolt_name"
-            if aws s3api head-object --bucket "$R2_BUCKET" --key "$bolt_key" --endpoint-url "$R2_ENDPOINT" 2>/dev/null; then
-              echo "Skipping $bolt_name (already exists in R2)"
-            else
-              aws s3 cp "$bolt_path" "s3://$R2_BUCKET/$bolt_key" --endpoint-url "$R2_ENDPOINT"
-              uploaded_bolt_count=$((uploaded_bolt_count + 1))
-            fi
+            aws s3 cp "$bolt_path" \
+              "s3://$R2_BUCKET/$release_dir/$bolt_name" \
+              --endpoint-url "$R2_ENDPOINT"
           done
 
-          cert_key="$R2_PREFIX/keys/${{ steps.prepare_keys.outputs.publish_key_name }}"
-          if aws s3api head-object --bucket "$R2_BUCKET" --key "$cert_key" --endpoint-url "$R2_ENDPOINT" 2>/dev/null; then
-            echo "Skipping cert (already exists in R2)"
-          else
-            aws s3 cp "${{ steps.prepare_keys.outputs.publish_key_file }}" \
-              "s3://$R2_BUCKET/$cert_key" \
-              --endpoint-url "$R2_ENDPOINT"
-          fi
+          aws s3 cp "${{ steps.prepare_keys.outputs.publish_key_file }}" \
+            "s3://$R2_BUCKET/$release_dir/keys/${{ steps.prepare_keys.outputs.publish_key_name }}" \
+            --endpoint-url "$R2_ENDPOINT"
 
-          if [[ "$uploaded_bolt_count" -gt 0 ]]; then
-            ts="$(date -u +%Y%m%dT%H%M%SZ)"
-            manifest_name="factory-app-version-${ts}.json"
-            aws s3 cp "$GITHUB_WORKSPACE/bolts/factory-app-version.json" \
-              "s3://$R2_BUCKET/$R2_PREFIX/${manifest_name}" \
-              --endpoint-url "$R2_ENDPOINT"
-            echo "Uploaded manifest: ${manifest_name}"
-          else
-            echo "No new bolt uploads, skipping manifest upload."
-          fi
+          aws s3 cp "$GITHUB_WORKSPACE/bolts/factory-app-version.json" \
+            "s3://$R2_BUCKET/$release_dir/factory-app-version.json" \
+            --endpoint-url "$R2_ENDPOINT"
+          echo "Uploaded release directory: $release_dir"
+          echo "Uploaded manifest: factory-app-version.json"
 
       - name: Cleanup key material
         if: always()
@@ -222,4 +218,4 @@ jobs:
           rm -f \
             "$RUNNER_TEMP/keys/private_key.pem" \
             "$RUNNER_TEMP/keys/public-cert.pem" \
-            "$RUNNER_TEMP/keys/public_key.p12"
+            "$RUNNER_TEMP/keys/public.pem"
