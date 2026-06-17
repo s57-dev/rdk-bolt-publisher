@@ -23,12 +23,17 @@ jobs:
   build-and-upload:
     environment: production-r2
     runs-on: self-hosted
+    strategy:
+      fail-fast: false
+      matrix:
+        machine: [arm, arm64]
     env:
       AWS_REGION: auto
       R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
       R2_BUCKET: ${{ secrets.CLOUDFLARE_R2_BUCKET }}
       BUILD_LIST: ${{ inputs.build_list }}
       KEY_FORMAT: ${{ inputs.key_format }}
+      BOLT_MACHINE: ${{ matrix.machine }}
       R2_PREFIX: ${{ inputs.r2_prefix }}
       PUBLISH_BASE_URL: https://repo.solution57.com
     steps:
@@ -95,6 +100,7 @@ jobs:
             -e BOLTS_DIR=/build/bolts \
             -e MANIFEST_FILE=/build/bolts/factory-app-version.json \
             -e KEY_FORMAT="${{ steps.prepare_keys.outputs.key_format }}" \
+            -e BOLT_MACHINE="${BOLT_MACHINE}" \
             -e PRIVATE_KEY_PASSPHRASE="${PRIVATE_KEY_PASSPHRASE:-}" \
             -e SIGNING_CERT_PATH=/build/keys/public-cert.pem \
             -v "$GITHUB_WORKSPACE:/build" \
@@ -107,7 +113,7 @@ jobs:
           set -euo pipefail
           ts="$(date -u +%Y%m%dT%H%M%SZ)"
           echo "ts=$ts" >> "$GITHUB_OUTPUT"
-          echo "release_dir=${R2_PREFIX}/${ts}" >> "$GITHUB_OUTPUT"
+          echo "release_dir=${R2_PREFIX}/${ts}/${BOLT_MACHINE}" >> "$GITHUB_OUTPUT"
 
       - name: Rewrite manifest for platform
         run: |
@@ -163,7 +169,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: rdk-bolt-packages
+          name: rdk-bolt-packages-${{ matrix.machine }}
           if-no-files-found: error
           path: |
             bolts/*.bolt
